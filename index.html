@@ -8,7 +8,7 @@
         :root {
             --bg-color: #121212;
             --card-color: #1e1e1e;
-            --accent-color: #ff5500; /* 1688 Orange tint */
+            --accent-color: #ff5500; /* 1688 Orange */
             --text-color: #e0e0e0;
             --text-muted: #a0a0a0;
         }
@@ -46,22 +46,26 @@
             color: var(--text-muted);
             font-size: 14px;
             margin-bottom: 24px;
+            line-height: 1.4;
         }
 
-        input[type="text"] {
+        textarea {
             width: 100%;
+            height: 100px;
             padding: 14px;
             border-radius: 8px;
             border: 1px solid #333;
             background-color: #2a2a2a;
             color: #fff;
-            font-size: 16px;
+            font-size: 15px;
             box-sizing: border-box;
             margin-bottom: 16px;
+            resize: vertical;
             transition: border-color 0.2s;
+            font-family: inherit;
         }
 
-        input[type="text"]:focus {
+        textarea:focus {
             border-color: var(--accent-color);
             outline: none;
         }
@@ -114,6 +118,7 @@
             border-radius: 6px;
             display: block;
             margin-bottom: 12px;
+            user-select: all;
         }
 
         .copy-btn {
@@ -130,17 +135,18 @@
             font-size: 14px;
             margin-top: 10px;
             color: #ffdd00;
+            font-weight: 500;
         }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h1>1688 QR Link Fixer</h1>
-    <p>Convert encrypted qr.1688.com app links into clean mobile links for CNfans</p>
+    <h1>1688 Link Cleaner</h1>
+    <p>Paste the entire app message below. The tool will automatically extract, clean, and convert the URL for CNfans.</p>
     
-    <input type="text" id="inputUrl" placeholder="Paste your https://qr.1688.com/... link here" autocomplete="off">
-    <button onclick="convertLink()">Convert Link</button>
+    <textarea id="inputText" placeholder="Paste the whole message here...&#10;e.g., 7另 %aD3dxxx %达 .hTtp://qr.1688.com/..."></textarea>
+    <button onclick="processAndConvert()">Clean & Convert</button>
     
     <div id="statusMessage" class="status"></div>
 
@@ -152,40 +158,55 @@
 </div>
 
 <script>
-async function convertLink() {
-    const input = document.getElementById('inputUrl').value.trim();
+async function processAndConvert() {
+    const input = document.getElementById('inputText').value.trim();
     const statusDiv = document.getElementById('statusMessage');
     const resultContainer = document.getElementById('resultContainer');
-    const outputSpan = document.getElementById('outputUrl');
 
     statusDiv.innerText = "";
     resultContainer.classList.remove('active');
 
-    if (!input.includes('1688.com')) {
-        statusDiv.innerText = "❌ Please enter a valid 1688 link.";
+    if (!input) {
+        statusDiv.innerText = "❌ Input is empty.";
         return;
     }
 
-    // If it's already a clean m.1688 or detail.1688 link, output it back
-    if (input.includes('offer/') || input.includes('id=')) {
-        let itemId = input.match(/(?:offer\/|id=)(\d+)/);
+    // REGEX MAGIC: This scans the entire block of text and finds anything starting with http:// or https://
+    const urlRegex = /(https?:\/\/[^\s]+)/gi;
+    const match = input.match(urlRegex);
+
+    if (!match) {
+        statusDiv.innerText = "❌ No link found inside the text. Make sure it contains a 1688 URL.";
+        return;
+    }
+
+    // This is our isolated URL link completely free of Chinese characters and emojis
+    let cleanUrl = match[0];
+
+    if (!cleanUrl.includes('1688.com')) {
+        statusDiv.innerText = "❌ Found a link, but it doesn't look like a 1688.com URL.";
+        return;
+    }
+
+    // Check if the link is already resolved (has an ID instead of a QR token)
+    if (cleanUrl.includes('offer/') || cleanUrl.includes('id=')) {
+        let itemId = cleanUrl.match(/(?:offer\/|id=)(\d+)/);
         if (itemId && itemId[1]) {
             showResult(`https://m.1688.com/offer/${itemId[1]}.html`);
+            statusDiv.innerText = "✅ Extracted and formatted successfully!";
             return;
         }
     }
 
-    statusDiv.innerText = "🔄 Resolving encrypted token...";
+    statusDiv.innerText = "🔄 Found QR Link! Resolving encrypted token...";
 
     try {
-        // We use a free, public CORS proxy to look through the 1688 shortlink redirect header safely in the browser.
-        const proxyUrl = 'https://corsproxy.io/?' + encodeURIComponent(input);
+        // Use proxy to catch the 302/301 tracking redirect from qr.1688.com
+        const proxyUrl = 'https://corsproxy.io/?' + encodeURIComponent(cleanUrl);
         const response = await fetch(proxyUrl);
-        
-        // Grab the final destination URL text
         const finalUrl = response.url;
         
-        // Extract the target product numerical ID using regex
+        // Match the true item digits
         const idMatch = finalUrl.match(/(?:offer\/|id=)(\d+)/);
 
         if (idMatch && idMatch[1]) {
@@ -193,18 +214,18 @@ async function convertLink() {
             statusDiv.innerText = "✅ Successfully converted!";
             showResult(cleanMobileUrl);
         } else {
-            // Backup parsing method if the proxy strips response.url properties
+            // Fallback checking the response contents if the redirect is cloaked
             const textData = await response.text();
             const fallbackMatch = textData.match(/(?:offer\/|id=)(\d+)/);
             if (fallbackMatch && fallbackMatch[1]) {
                 showResult(`https://m.1688.com/offer/${fallbackMatch[1]}.html`);
                 statusDiv.innerText = "✅ Successfully converted!";
             } else {
-                statusDiv.innerText = "❌ Could not extract Product ID. Try manually opening the link in a browser first.";
+                statusDiv.innerText = "❌ Extracted the link, but couldn't decode the Item ID. 1688 might be blocking the proxy.";
             }
         }
     } catch (error) {
-        statusDiv.innerText = "❌ Network error. Try pasting the URL into a standard browser tab first to let it redirect, then copy that final address.";
+        statusDiv.innerText = "❌ Connection failed. Try copying just the link out manually into a browser tab.";
         console.error(error);
     }
 }
@@ -219,7 +240,7 @@ function showResult(url) {
 function copyToClipboard() {
     const text = document.getElementById('outputUrl').innerText;
     navigator.clipboard.writeText(text).then(() => {
-        alert("Link copied! Paste it straight into CNfans.");
+        alert("Link copied! Ready to paste into CNfans.");
     });
 }
 </script>
